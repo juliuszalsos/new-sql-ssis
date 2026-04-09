@@ -55,7 +55,7 @@ def setup_database():
         ('BAFil', 'Bachelor of Arts in Filipino Language and Literature', 'CASS'),
         ('BSEdMath', 'Bachelor of Secondary Education in Mathematics', 'CED'),
         ('BSEdEnglish', 'Bachelor of Secondary Education in English', 'CED'),
-        ('BSEd', "Bachelor of Secondary Education", "CED"),
+        ('BSEdTLE', "Bachelor of Secondary Education in Technology Livelihood Education", "CED"),
         ('BSEE', "Bachelor of Science in Electrical Engineering", "COE"),
         ('BSStat', "Bachelor of Science in Statistics", "CSM"),
         ('BSAccountancy', "Bachelor of Science in Accountancy", "CEBA"),
