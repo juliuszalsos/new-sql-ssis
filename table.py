@@ -108,10 +108,7 @@ class StudentSystem(QMainWindow):
         table_name = model.tableName()
         text = text.strip()
 
-        # 1. First, get the "Soft Delete" base filter 
-        # (This ensures we don't show students of deleted colleges during a search)
         if table_name == "student":
-            # We need to re-run the logic to see which programs are currently valid
             college_query = self.db.exec("SELECT college_code FROM college")
             valid_cols = []
             while college_query.next(): valid_cols.append(f"'{college_query.value(0)}'")
@@ -124,15 +121,11 @@ class StudentSystem(QMainWindow):
             
             base_filter = f"program_code IN ({prog_list})"
         else:
-            base_filter = "1=1" # Means "show everything" for other tables
-
-        # 2. Build the Search Filter
+            base_filter = "1=1" 
         if not text:
-            # If search is empty, just use the base visibility filter
             model.setFilter(base_filter)
         else:
             if table_name == "student":
-                # Search across ALL student columns
                 search_filter = (f"({base_filter}) AND ("
                                 f"id LIKE '%{text}%' OR "
                                 f"firstname LIKE '%{text}%' OR "
@@ -144,7 +137,7 @@ class StudentSystem(QMainWindow):
                 search_filter = (f"program_code LIKE '%{text}%' OR "
                                 f"program_name LIKE '%{text}%' OR "
                                 f"college_code LIKE '%{text}%'")
-            else: # college
+            else:
                 search_filter = (f"college_code LIKE '%{text}%' OR "
                                 f"college_name LIKE '%{text}%'")
             
@@ -222,14 +215,46 @@ class StudentSystem(QMainWindow):
     def save_changes(self):
         model, _ = self.get_current_model_view()
         
+        if model.tableName() == "student":
+            program_query = self.db.exec("SELECT program_code FROM program")
+            valid_programs = []
+            while program_query.next():
+                valid_programs.append(str(program_query.value(0)).strip())
+
+            for row in range(model.rowCount()):
+                s_id = str(model.index(row, 0).data() or "").strip()
+                fname = str(model.index(row, 1).data() or "").strip().title()
+                lname = str(model.index(row, 2).data() or "").strip().title()
+                prog_code = str(model.index(row, 3).data() or "").strip()
+                year_lvl = str(model.index(row, 4).data() or "").strip()
+                gender = str(model.index(row, 5).data() or "").strip().capitalize()
+
+                id_pattern = r"^(201[8-9]|202[0-6])-([0-1][0-9]{3}|2[0-4][0-9]{2}|2500)$"
+                name_pattern = r"^[a-zA-Z\u00C0-\u017F\s\-]+$"
+                
+                if not re.match(name_pattern, fname) or not re.match(name_pattern, lname):
+                    QMessageBox.warning(self, "Invalid Name", 
+                                        f"Row {row+1}: Names must contain letters, spaces, or dashes only.")
+                    return
+
+                if prog_code not in valid_programs:
+                    QMessageBox.warning(self, "Invalid Program", 
+                                        f"Row {row+1}: Program '{prog_code}' does not exist!\n"
+                                        f"Please use an existing code from the Programs tab.")
+                    return
+
+                if year_lvl not in ["1", "2", "3", "4"]:
+                    QMessageBox.warning(self, "Invalid Year", f"Row {row+1}: Year must be 1, 2, 3, or 4.")
+                    return
+
+                if gender not in ["Male", "Female", "Other"]:
+                    QMessageBox.warning(self, "Invalid Gender", 
+                                        f"Row {row+1}: Gender must be 'Male', 'Female', or 'Other'.")
+                    return
+
         if model.submitAll():
-            self.student_model.select()
-            self.program_model.select()
-            self.college_model.select()
-            
             self.apply_filters()
-            
-            QMessageBox.information(self, "Success", "Changes saved and all views updated!")
+            QMessageBox.information(self, "Success", "All records validated and saved!")
         else:
             QMessageBox.warning(self, "Error", f"Database error: {model.lastError().text()}")
     
