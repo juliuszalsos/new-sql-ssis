@@ -35,7 +35,9 @@ def setup_database():
     programs = [
         ('BSCS', 'Bachelor of Science in Computer Science', 'CCS'),
         ('BSIT', 'Bachelor of Science in Information Technology', 'CCS'),
-        ('BSEcon', 'Bachelor of Science in Economics', 'CEBA'),
+        ("BSCA", " Bachelor of Science in Computer Application", "CCS"), 
+        ("BSIS", "Bachelor of Science in Information Systems", "CCS"),
+        ('BSEE', "Bachelor of Science in Electrical Engineering", "COE"),
         ('BSCE', 'Bachelor of Science in Civil Engineering', 'COE'),
         ('BSCpE', 'Bachelor of Science in Computer Engineering', 'COE'),
         ('BSEcE', 'Bachelor of Science in Electronics & Communications Engineering', 'COE'),
@@ -48,7 +50,10 @@ def setup_database():
         ('BSBio (Biodiversity)', 'Bachelor of Science in Biology (Majoring in Biodiversity)', 'CSM'),
         ('BSChem', 'Bachelor of Science in Chemistry', 'CSM'),
         ('BSPhy', 'Bachelor of Science in Physics', 'CSM'),
+        ('BSStat', "Bachelor of Science in Statistics", "CSM"),
+        ('BSEcon', 'Bachelor of Science in Economics', 'CEBA'),
         ('BSHM', 'Bachelor of Science in Hospitality Management', 'CEBA'),
+        ('BSAccountancy', "Bachelor of Science in Accountancy", "CEBA"),
         ('BSPsych', 'Bachelor of Science in Psychology', 'CASS'),
         ('BAPsych', 'Bachelor of Arts in Psychology', 'CASS'),
         ('BAEng', 'Bachelor of Arts in English Literature', 'CASS'),
@@ -56,12 +61,7 @@ def setup_database():
         ('BSEdMath', 'Bachelor of Secondary Education in Mathematics', 'CED'),
         ('BSEdEnglish', 'Bachelor of Secondary Education in English', 'CED'),
         ('BSEdTLE', "Bachelor of Secondary Education in Technology Livelihood Education", "CED"),
-        ('BSEE', "Bachelor of Science in Electrical Engineering", "COE"),
-        ('BSStat', "Bachelor of Science in Statistics", "CSM"),
-        ('BSAccountancy', "Bachelor of Science in Accountancy", "CEBA"),
-        ('BSEdSH', "Bachelor of Secondary Education in Social Sciences", "CED"),
-        ("BSCA", " Bachelor of Science in Computer Application", "CCS"), 
-        ("BSIS", "Bachelor of Science in Information Systems", "CCS"), 
+        ('BSEdSH', "Bachelor of Secondary Education in Social Sciences", "CED"), 
         ("BSN", "Bachelor of Science in Nursing", "CHS")
     ]
     cursor.executemany('INSERT OR IGNORE INTO program VALUES (?,?,?)', programs)

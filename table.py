@@ -17,12 +17,6 @@ class StudentSystem(QMainWindow):
             QMessageBox.critical(self, "Error", "Could not open database!")
             sys.exit(1)
 
-        self.student_model = QSqlTableModel(self)
-        self.student_model.setTable("student")
-        
-        self.student_model.setEditStrategy(QSqlTableModel.EditStrategy.OnManualSubmit)
-        self.student_model.select()
-
         main_layout = QVBoxLayout()
 
         nav_layout = QHBoxLayout()
@@ -99,13 +93,6 @@ class StudentSystem(QMainWindow):
         container.setLayout(main_layout)
         self.setCentralWidget(container)
 
-    def switch_tab(self, index):
-        self.stack.setCurrentIndex(index)
-        self.btn_students.setChecked(index == 0)
-        self.btn_programs.setChecked(index == 1)
-        self.btn_colleges.setChecked(index == 2)
-        self.search_data(self.search_bar.text())
-
     def get_current_model_view(self):
         """Helper to find out which table is currently visible."""
         idx = self.stack.currentIndex()
@@ -120,9 +107,9 @@ class StudentSystem(QMainWindow):
         if table_name == "student":
             filter_str = f"lastname LIKE '%{text}%' OR id LIKE '%{text}%'"
         elif table_name == "program":
-            filter_str = f"name LIKE '%{text}%' OR code LIKE '%{text}%'"
+            filter_str = f"program_name LIKE '%{text}%' OR program_code LIKE '%{text}%'"
         else:
-            filter_str = f"name LIKE '%{text}%' OR code LIKE '%{text}%'"
+            filter_str = f"college_name LIKE '%{text}%' OR college_code LIKE '%{text}%'"
             
         model.setFilter(filter_str)
         model.select()
@@ -137,38 +124,70 @@ class StudentSystem(QMainWindow):
         model, view = self.get_current_model_view()
         index = view.selectionModel().currentIndex()
         if index.isValid():
-            model.removeRow(index.row())
-            model.select()
+            confirm = QMessageBox.question(self, "Confirm Delete", 
+                                         "This will hide related data across all tabs. Proceed?",
+                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if confirm == QMessageBox.StandardButton.Yes:
+                model.removeRow(index.row())
+                if model.submitAll():
+                    self.student_model.select()
+                    self.program_model.select()
+                    self.college_model.select()
+                    self.apply_filters() 
+                else:
+                    QMessageBox.warning(self, "Error", "Could not delete row.")
+        else:
+            QMessageBox.warning(self, "Selection", "Select a row first.")
             
+    def switch_tab(self, index):
+        self.stack.setCurrentIndex(index)
+        self.btn_students.setChecked(index == 0)
+        self.btn_programs.setChecked(index == 1)
+        self.btn_colleges.setChecked(index == 2)
+        self.apply_filters()
+        
+    def apply_filters(self):
+        """Requirement: Hide students/programs if their parent is 'deleted'"""
+        self.student_model.blockSignals(True)
+        self.program_model.blockSignals(True)
+
+        try:
+            college_query = self.db.exec("SELECT college_code FROM college")
+            valid_colleges = []
+            while college_query.next():
+                valid_colleges.append(f"'{college_query.value(0)}'")
+            
+            col_list = ",".join(valid_colleges) if valid_colleges else "'EMPTY_DB'"
+
+            self.program_model.setFilter(f"college_code IN ({col_list})")
+            self.program_model.select()
+
+            program_query = self.db.exec(f"SELECT program_code FROM program WHERE college_code IN ({col_list})")
+            valid_programs = []
+            while program_query.next():
+                valid_programs.append(f"'{program_query.value(0)}'")
+            
+            prog_list = ",".join(valid_programs) if valid_programs else "'EMPTY_DB'"
+
+            self.student_model.setFilter(f"program_code IN ({prog_list})")
+            self.student_model.select()
+
+        except Exception as e:
+            print(f"Filter Error: {e}")
+        
+        self.student_model.blockSignals(False)
+        self.program_model.blockSignals(False)
     def save_changes(self):
         model, _ = self.get_current_model_view()
         
-        if model.tableName() == "student":
-            for row in range(model.rowCount()):
-                s_id = str(model.index(row, 0).data()).strip()
-                fname = str(model.index(row, 1).data()).strip()
-                lname = str(model.index(row, 2).data()).strip()
-                year_lvl = str(model.index(row, 4).data()).strip()
-                gender = str(model.index(row, 5).data()).strip().capitalize()
-
-                id_pattern = r"^(201[8-9]|202[0-6])-([0-1][0-9]{3}|2[0-4][0-9]{2}|2500)$"                
-                if not re.match(id_pattern, s_id) or s_id.endswith("-0000"):
-                    QMessageBox.warning(self, "Invalid ID", f"Row {row+1}: ID '{s_id}' is invalid.\nYear: 2018-2026, Range: 0001-2500")
-                    return
-
-                if any(char.isdigit() for char in fname) or any(char.isdigit() for char in lname):
-                    QMessageBox.warning(self, "Invalid Name", f"Row {row+1}: Names cannot contain numbers!")
-                    return
-
-                if year_lvl not in ["1", "2", "3", "4"]:
-                    QMessageBox.warning(self, "Invalid Year", f"Row {row+1}: Year Level must be 1, 2, 3, or 4.")
-                    return
-                if gender not in ["Male", "Female", "Other"]:
-                    QMessageBox.warning(self, "Invalid Gender", f"Row {row+1}: Gender must be 'Male', 'Female', or 'Other'.\n(You entered: '{gender}')")
-                    return
-
         if model.submitAll():
-            QMessageBox.information(self, "Success", "All records validated and saved!")
+            self.student_model.select()
+            self.program_model.select()
+            self.college_model.select()
+            
+            self.apply_filters()
+            
+            QMessageBox.information(self, "Success", "Changes saved and all views updated!")
         else:
             QMessageBox.warning(self, "Error", f"Database error: {model.lastError().text()}")
     
