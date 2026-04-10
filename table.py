@@ -1,34 +1,71 @@
 import sys
 import re
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QTableView, QVBoxLayout, 
-                             QWidget, QLineEdit, QPushButton, QHBoxLayout, QMessageBox, QStackedWidget, QLabel)
-from PyQt6.QtSql import QSqlDatabase, QSqlTableModel
+import math
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                             QHBoxLayout, QPushButton, QTableView, QLineEdit, 
+                             QLabel, QStackedWidget, QMessageBox)
+from PyQt6.QtSql import QSqlDatabase, QSqlTableModel, QSqlQuery
 from PyQt6.QtCore import Qt
 
-class StudentSystem(QMainWindow):
+class PaginatedModel(QSqlTableModel):
+    def __init__(self, parent=None, db=None):
+        super().__init__(parent, db)
+        self.limit_val = 200
+        self.offset_val = 0
+
+    def selectStatement(self):
+        table = self.tableName()
+        f = self.filter()
+        where_clause = f"WHERE {f}" if f else ""
+        query = f"SELECT * FROM {table} {where_clause} LIMIT {self.limit_val} OFFSET {self.offset_val}"
+        return query
+
+class StudentManagement(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("SSIS Pro - Multi-Table Management")
-        self.resize(1100, 750)
+        self.setMinimumSize(1100, 750)
 
         self.db = QSqlDatabase.addDatabase("QSQLITE")
         self.db.setDatabaseName("student_system.db")
         if not self.db.open():
-            QMessageBox.critical(self, "Error", "Could not open database!")
+            QMessageBox.critical(self, "Error", "Could not open database")
             sys.exit(1)
 
-        main_layout = QVBoxLayout()
+        self.current_page = 0
+        self.page_size = 200
+
+        self.init_models()
+        self.init_ui()
+        self.update_page_display()
+
+    def init_models(self):
+        self.college_model = QSqlTableModel(self, self.db)
+        self.college_model.setTable("college")
+        self.college_model.setEditStrategy(QSqlTableModel.EditStrategy.OnManualSubmit)
+
+        self.program_model = QSqlTableModel(self, self.db)
+        self.program_model.setTable("program")
+        self.program_model.setEditStrategy(QSqlTableModel.EditStrategy.OnManualSubmit)
+
+        self.student_model = PaginatedModel(self, self.db)
+        self.student_model.setTable("student")
+        self.student_model.setEditStrategy(QSqlTableModel.EditStrategy.OnManualSubmit)
+
+    def init_ui(self):
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        main_layout = QVBoxLayout(main_widget)
 
         nav_layout = QHBoxLayout()
-        self.btn_students = QPushButton("👥 Students")
-        self.btn_programs = QPushButton("🎓 Programs")
-        self.btn_colleges = QPushButton("🏛️ Colleges")
-        
-        for btn in [self.btn_students, self.btn_programs, self.btn_colleges]:
+        self.btn_students = QPushButton(" Students")
+        self.btn_programs = QPushButton(" Programs")
+        self.btn_colleges = QPushButton(" Colleges")
+        for btn, idx in [(self.btn_students, 0), (self.btn_programs, 1), (self.btn_colleges, 2)]:
             btn.setCheckable(True)
-            btn.setMinimumHeight(40)
+            btn.setFixedHeight(40)
+            btn.clicked.connect(lambda _, i=idx: self.switch_tab(i))
             nav_layout.addWidget(btn)
-            
         self.btn_students.setChecked(True)
         main_layout.addLayout(nav_layout)
 
@@ -38,261 +75,177 @@ class StudentSystem(QMainWindow):
         main_layout.addWidget(self.search_bar)
 
         self.stack = QStackedWidget()
-
-        self.student_model = QSqlTableModel(self)
-        self.student_model.setTable("student")
-        self.student_model.setEditStrategy(QSqlTableModel.EditStrategy.OnFieldChange)
-        self.student_model.select()
         self.student_view = QTableView()
-        self.student_view.setModel(self.student_model)
-        self.student_view.setSortingEnabled(True)
-        self.stack.addWidget(self.student_view)
-
-        self.program_model = QSqlTableModel(self)
-        self.program_model.setTable("program")
-        self.program_model.setEditStrategy(QSqlTableModel.EditStrategy.OnFieldChange)
-        self.program_model.select()
         self.program_view = QTableView()
-        self.program_view.setModel(self.program_model)
-        self.program_view.setSortingEnabled(True)
-        self.stack.addWidget(self.program_view)
-
-        self.college_model = QSqlTableModel(self)
-        self.college_model.setTable("college")
-        self.college_model.setEditStrategy(QSqlTableModel.EditStrategy.OnFieldChange)
-        self.college_model.select()
         self.college_view = QTableView()
-        self.college_view.setModel(self.college_model)
-        self.college_view.setSortingEnabled(True)
-        self.stack.addWidget(self.college_view)
-
+        for v, m in [(self.student_view, self.student_model), (self.program_view, self.program_model), (self.college_view, self.college_model)]:
+            v.setModel(m)
+            v.setSortingEnabled(True)
+            v.horizontalHeader().setStretchLastSection(True)
+            self.stack.addWidget(v)
         main_layout.addWidget(self.stack)
 
-        self.btn_students.clicked.connect(lambda: self.switch_tab(0))
-        self.btn_programs.clicked.connect(lambda: self.switch_tab(1))
-        self.btn_colleges.clicked.connect(lambda: self.switch_tab(2))
-
-        crud_layout = QHBoxLayout()
+        pagination_layout = QHBoxLayout()
+        self.btn_prev = QPushButton(" ◀ Previous ")
+        self.btn_next = QPushButton(" Next ▶ ")
+        self.page_label = QLabel("Page 1 / 1")
+        self.total_count_label = QLabel("Total Students: 0")
+        self.total_count_label.setStyleSheet("font-weight: bold; color: #555; margin-left: 20px;")
         
-        add_btn = QPushButton("➕ Add Row")
-        save_btn = QPushButton("🔄 Update/Save Changes") 
-        del_btn = QPushButton("🗑️ Delete Selected")
-        refresh_btn = QPushButton("⌛ Refresh")
-
-        add_btn.clicked.connect(self.add_row)
-        save_btn.clicked.connect(self.save_changes)
-        del_btn.clicked.connect(self.delete_row)
-        refresh_btn.clicked.connect(self.refresh_table)
-
-        save_btn.setStyleSheet("background-color: #2ecc71; color: white; font-weight: bold;")
+        self.btn_prev.clicked.connect(self.prev_page)
+        self.btn_next.clicked.connect(self.next_page)
         
-        crud_layout.addWidget(add_btn)
-        crud_layout.addWidget(save_btn)
-        crud_layout.addWidget(del_btn)
-        crud_layout.addWidget(refresh_btn)
-        main_layout.addLayout(crud_layout)
+        pagination_layout.addStretch()
+        pagination_layout.addWidget(self.btn_prev)
+        pagination_layout.addWidget(self.page_label)
+        pagination_layout.addWidget(self.btn_next)
+        pagination_layout.addWidget(self.total_count_label)
+        pagination_layout.addStretch()
+        main_layout.addLayout(pagination_layout)
 
-        container = QWidget()
-        container.setLayout(main_layout)
-        self.setCentralWidget(container)
+        action_layout = QHBoxLayout()
+        btn_add = QPushButton(" ✚ Add Row")
+        btn_save = QPushButton(" 💾 Update/Save Changes")
+        btn_del = QPushButton(" 🗑 Delete Selected")
+        btn_refresh = QPushButton(" ⏳ Refresh")
+        btn_save.setStyleSheet("background-color: #2ecc71; color: white; font-weight: bold;")
+        
+        btn_add.clicked.connect(lambda: self.get_current_model_view()[0].insertRow(0))
+        btn_save.clicked.connect(self.save_changes)
+        btn_del.clicked.connect(self.delete_row)
+        btn_refresh.clicked.connect(self.update_page_display)
+        
+        for btn in [btn_add, btn_save, btn_del, btn_refresh]:
+            btn.setFixedHeight(35)
+            action_layout.addWidget(btn)
+        main_layout.addLayout(action_layout)
 
     def get_current_model_view(self):
-        """Helper to find out which table is currently visible."""
         idx = self.stack.currentIndex()
         if idx == 0: return self.student_model, self.student_view
         if idx == 1: return self.program_model, self.program_view
         return self.college_model, self.college_view
 
-    def search_data(self, text):
-        model, _ = self.get_current_model_view()
-        table_name = model.tableName()
-        text = text.strip()
-
-        if table_name == "student":
-            college_query = self.db.exec("SELECT college_code FROM college")
-            valid_cols = []
-            while college_query.next(): valid_cols.append(f"'{college_query.value(0)}'")
-            col_list = ",".join(valid_cols) if valid_cols else "''"
-            
-            prog_query = self.db.exec(f"SELECT program_code FROM program WHERE college_code IN ({col_list})")
-            valid_progs = []
-            while prog_query.next(): valid_progs.append(f"'{prog_query.value(0)}'")
-            prog_list = ",".join(valid_progs) if valid_progs else "''"
-            
-            base_filter = f"program_code IN ({prog_list})"
-        else:
-            base_filter = "1=1" 
-        if not text:
-            model.setFilter(base_filter)
-        else:
-            if table_name == "student":
-                search_filter = (f"({base_filter}) AND ("
-                                f"id LIKE '%{text}%' OR "
-                                f"firstname LIKE '%{text}%' OR "
-                                f"lastname LIKE '%{text}%' OR "
-                                f"program_code LIKE '%{text}%' OR "
-                                f"year LIKE '%{text}%' OR "
-                                f"gender LIKE '%{text}%')")
-            elif table_name == "program":
-                search_filter = (f"program_code LIKE '%{text}%' OR "
-                                f"program_name LIKE '%{text}%' OR "
-                                f"college_code LIKE '%{text}%'")
-            else:
-                search_filter = (f"college_code LIKE '%{text}%' OR "
-                                f"college_name LIKE '%{text}%'")
-            
-            model.setFilter(search_filter)
-
-        model.select()
-        
-    def add_row(self):
-        model, view = self.get_current_model_view()
-        row = model.rowCount()
-        model.insertRow(row)
-        view.scrollToBottom()
-
-    def delete_row(self):
-        model, view = self.get_current_model_view()
-        index = view.selectionModel().currentIndex()
-        if index.isValid():
-            confirm = QMessageBox.question(self, "Confirm Delete", 
-                                         "This will hide related data across all tabs. Proceed?",
-                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            if confirm == QMessageBox.StandardButton.Yes:
-                model.removeRow(index.row())
-                if model.submitAll():
-                    self.student_model.select()
-                    self.program_model.select()
-                    self.college_model.select()
-                    self.apply_filters() 
-                else:
-                    QMessageBox.warning(self, "Error", "Could not delete row.")
-        else:
-            QMessageBox.warning(self, "Selection", "Select a row first.")
-            
     def switch_tab(self, index):
         self.stack.setCurrentIndex(index)
         self.btn_students.setChecked(index == 0)
         self.btn_programs.setChecked(index == 1)
         self.btn_colleges.setChecked(index == 2)
-        self.apply_filters()
+        self.current_page = 0
+        self.search_bar.clear()
+        self.update_page_display()
+
+    def update_page_display(self):
+        c_q = self.db.exec("SELECT college_code FROM college")
+        v_c = []
+        while c_q.next(): v_c.append(f"'{c_q.value(0)}'")
+        c_list = ",".join(v_c) if v_c else "''"
         
-    def apply_filters(self):
-        """Requirement: Hide students/programs if their parent is 'deleted'"""
-        self.student_model.blockSignals(True)
-        self.program_model.blockSignals(True)
+        p_q = self.db.exec(f"SELECT program_code FROM program WHERE college_code IN ({c_list})")
+        v_p = []
+        while p_q.next(): v_p.append(f"'{p_q.value(0)}'")
+        p_list = ",".join(v_p) if v_p else "''"
 
-        try:
-            college_query = self.db.exec("SELECT college_code FROM college")
-            valid_colleges = []
-            while college_query.next():
-                valid_colleges.append(f"'{college_query.value(0)}'")
-            
-            col_list = ",".join(valid_colleges) if valid_colleges else "'EMPTY_DB'"
-
-            self.program_model.setFilter(f"college_code IN ({col_list})")
-            self.program_model.select()
-
-            program_query = self.db.exec(f"SELECT program_code FROM program WHERE college_code IN ({col_list})")
-            valid_programs = []
-            while program_query.next():
-                valid_programs.append(f"'{program_query.value(0)}'")
-            
-            prog_list = ",".join(valid_programs) if valid_programs else "'EMPTY_DB'"
-
-            self.student_model.setFilter(f"program_code IN ({prog_list})")
-            self.student_model.select()
-
-        except Exception as e:
-            print(f"Filter Error: {e}")
-        
-        self.student_model.blockSignals(False)
-        self.program_model.blockSignals(False)
-        
-        _, view = self.get_current_model_view()
-        view.sortByColumn(view.horizontalHeader().sortIndicatorSection(), 
-                          view.horizontalHeader().sortIndicatorOrder())
-    def save_changes(self):
         model, _ = self.get_current_model_view()
-        table_name = model.tableName()
+        search_text = self.search_bar.text().strip()
 
-        if table_name == "student":
-            seen_ids = set()
+        if isinstance(model, PaginatedModel):
+            current_filter = f"program_code IN ({p_list})"
+            if search_text:
+                current_filter += f" AND (id LIKE '%{search_text}%' OR firstname LIKE '%{search_text}%' OR lastname LIKE '%{search_text}%' OR program_code LIKE '%{search_text}%' OR year LIKE '%{search_text}%' OR gender LIKE '%{search_text}%')"
             
-            program_query = self.db.exec("SELECT program_code FROM program")
-            valid_programs = []
-            while program_query.next():
-                valid_programs.append(str(program_query.value(0)).strip())
+            model.setFilter(current_filter)
 
-            for row in range(model.rowCount()):
-                s_id = str(model.index(row, 0).data() or "").strip()
-                fname = str(model.index(row, 1).data() or "").strip()
-                lname = str(model.index(row, 2).data() or "").strip()
-                prog_code = str(model.index(row, 3).data() or "").strip()
-                year_lvl = str(model.index(row, 4).data() or "").strip()
-                gender = str(model.index(row, 5).data() or "").strip().capitalize()
-
-                id_pattern = r"^(201[8-9]|202[0-6])-([0-1][0-9]{3}|2[0-4][0-9]{2}|2500)$"
-                if not re.match(id_pattern, s_id) or s_id.endswith("-0000"):
-                    QMessageBox.warning(self, "Validation Error", 
-                        f"Row {row+1}: ID '{s_id}' is invalid.\nYear: 2018-2026, Sequence: 0001-2500")
-                    return
-
-                if s_id in seen_ids:
-                    QMessageBox.warning(self, "Validation Error", f"Row {row+1}: Duplicate ID '{s_id}' found!")
-                    return
-                seen_ids.add(s_id)
-
-                name_pattern = r"^[a-zA-Z\u00C0-\u017F\s\-]+$"
-                if not re.match(name_pattern, fname) or not re.match(name_pattern, lname):
-                    QMessageBox.warning(self, "Validation Error", 
-                        f"Row {row+1}: Names must contain letters, ñ, spaces, or dashes only.")
-                    return
-
-                if prog_code not in valid_programs:
-                    QMessageBox.warning(self, "Validation Error", 
-                        f"Row {row+1}: Program '{prog_code}' does not exist in the database.")
-                    return
-
-                if year_lvl not in ["1", "2", "3", "4"]:
-                    QMessageBox.warning(self, "Validation Error", f"Row {row+1}: Year must be 1, 2, 3, or 4.")
-                    return
-
-                if gender not in ["Male", "Female", "Other"]:
-                    QMessageBox.warning(self, "Validation Error", f"Row {row+1}: Gender must be Male, Female, or Other.")
-                    return
-
-        elif table_name == "program":
-            college_query = self.db.exec("SELECT college_code FROM college")
-            valid_colleges = []
-            while college_query.next():
-                valid_colleges.append(str(college_query.value(0)).strip())
-
-            for row in range(model.rowCount()):
-                col_code = str(model.index(row, 2).data() or "").strip()
-                if col_code not in valid_colleges:
-                    QMessageBox.warning(self, "Validation Error", 
-                        f"Row {row+1}: College '{col_code}' does not exist.")
-                    return
-
-        if model.submitAll():
-            self.student_model.select()
-            self.program_model.select()
-            self.college_model.select()
-            self.apply_filters()
+            count_q = QSqlQuery(self.db)
+            count_q.prepare(f"SELECT COUNT(*) FROM student WHERE {current_filter}")
+            count_q.exec()
+            total = 0
+            if count_q.next(): total = count_q.value(0)
             
-            QMessageBox.information(self, "Success", "All records validated and saved successfully!")
+            self.total_count_label.setText(f"Total Students: {total}")
+            self.total_count_label.setVisible(True)
+            
+            max_p = math.ceil(total / self.page_size) if total > 0 else 1
+            model.limit_val = self.page_size
+            model.offset_val = self.current_page * self.page_size
+            model.select()
+            
+            self.page_label.setText(f"Page {self.current_page + 1} / {max_p}")
+            self.btn_prev.setEnabled(self.current_page > 0)
+            self.btn_next.setEnabled((self.current_page + 1) < max_p)
         else:
-            QMessageBox.warning(self, "Database Error", f"Could not save changes: {model.lastError().text()}")
+            self.total_count_label.setVisible(False)
+            self.page_label.setText("Showing All")
             
-    def refresh_table(self):
-        """Reloads data from the database file"""
-        model, _ = self.get_current_model_view()
-        model.select()
+            if model.tableName() == "program":
+                f = f"college_code IN ({c_list})"
+                
+                if search_text: 
+                    f += f" AND (program_code LIKE '%{search_text}%' OR program_name LIKE '%{search_text}%' OR college_code LIKE '%{search_text}%')"
+                
+                model.setFilter(f)
+                
+            elif model.tableName() == "college":
+                if search_text: 
+                    model.setFilter(f"college_code LIKE '%{search_text}%' OR college_name LIKE '%{search_text}%'")
+                else: 
+                    model.setFilter("")
+                
+            model.select()
+
+    def search_data(self, text):
+        self.current_page = 0
+        self.update_page_display()
+
+    def delete_row(self):
+        m, v = self.get_current_model_view()
+        idx = v.selectionModel().currentIndex()
+        if idx.isValid() and QMessageBox.question(self, "Delete", "Confirm deletion?") == QMessageBox.StandardButton.Yes:
+            m.removeRow(idx.row())
+            m.submitAll()
+            self.update_page_display()
+
+    def save_changes(self):
+        m, _ = self.get_current_model_view()
+        if m.tableName() == "student":
+            seen_ids = set()
+            p_q = self.db.exec("SELECT program_code FROM program")
+            valid_progs = []
+            while p_q.next(): valid_progs.append(str(p_q.value(0)).strip())
+
+            for r in range(m.rowCount()):
+                sid = str(m.index(r, 0).data() or "").strip()
+                fn = str(m.index(r, 1).data() or "").strip()
+                ln = str(m.index(r, 2).data() or "").strip()
+                prg = str(m.index(r, 3).data() or "").strip()
+                yr = str(m.index(r, 4).data() or "").strip()
+                gen = str(m.index(r, 5).data() or "").strip().capitalize()
+
+                if not re.match(r"^(201[8-9]|202[0-6])-([0-1][0-9]{3}|2[0-4][0-9]{2}|2500)$", sid):
+                    QMessageBox.warning(self, "Error", f"Row {r+1}: Invalid ID format."); return
+                if sid in seen_ids:
+                    QMessageBox.warning(self, "Error", f"Row {r+1}: Duplicate ID."); return
+                seen_ids.add(sid)
+                if not re.match(r"^[a-zA-Z\u00C0-\u017F\s\-]+$", fn) or not re.match(r"^[a-zA-Z\u00C0-\u017F\s\-]+$", ln):
+                    QMessageBox.warning(self, "Error", f"Row {r+1}: Invalid name characters (letters/dashes/ñ only)."); return
+                if prg not in valid_progs:
+                    QMessageBox.warning(self, "Error", f"Row {r+1}: Program '{prg}' does not exist."); return
+                if yr not in ["1", "2", "3", "4"]:
+                    QMessageBox.warning(self, "Error", f"Row {r+1}: Year must be 1-4."); return
+                if gen not in ["Male", "Female", "Other"]:
+                    QMessageBox.warning(self, "Error", f"Row {r+1}: Use Male, Female, or Other."); return
+
+        if m.submitAll():
+            self.update_page_display()
+            QMessageBox.information(self, "Success", "Saved.")
+        else:
+            QMessageBox.warning(self, "Error", m.lastError().text())
+
+    def next_page(self): self.current_page += 1; self.update_page_display()
+    def prev_page(self): self.current_page -= 1; self.update_page_display()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    app.setStyle("Fusion")
-    window = StudentSystem()
+    window = StudentManagement()
     window.show()
     sys.exit(app.exec())
