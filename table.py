@@ -45,6 +45,7 @@ class StudentSystem(QMainWindow):
         self.student_model.select()
         self.student_view = QTableView()
         self.student_view.setModel(self.student_model)
+        self.student_view.setSortingEnabled(True)
         self.stack.addWidget(self.student_view)
 
         self.program_model = QSqlTableModel(self)
@@ -53,6 +54,7 @@ class StudentSystem(QMainWindow):
         self.program_model.select()
         self.program_view = QTableView()
         self.program_view.setModel(self.program_model)
+        self.program_view.setSortingEnabled(True)
         self.stack.addWidget(self.program_view)
 
         self.college_model = QSqlTableModel(self)
@@ -61,6 +63,7 @@ class StudentSystem(QMainWindow):
         self.college_model.select()
         self.college_view = QTableView()
         self.college_view.setModel(self.college_model)
+        self.college_view.setSortingEnabled(True)
         self.stack.addWidget(self.college_view)
 
         main_layout.addWidget(self.stack)
@@ -103,17 +106,52 @@ class StudentSystem(QMainWindow):
     def search_data(self, text):
         model, _ = self.get_current_model_view()
         table_name = model.tableName()
+        text = text.strip()
 
+        # 1. First, get the "Soft Delete" base filter 
+        # (This ensures we don't show students of deleted colleges during a search)
         if table_name == "student":
-            filter_str = f"lastname LIKE '%{text}%' OR id LIKE '%{text}%'"
-        elif table_name == "program":
-            filter_str = f"program_name LIKE '%{text}%' OR program_code LIKE '%{text}%'"
-        else:
-            filter_str = f"college_name LIKE '%{text}%' OR college_code LIKE '%{text}%'"
+            # We need to re-run the logic to see which programs are currently valid
+            college_query = self.db.exec("SELECT college_code FROM college")
+            valid_cols = []
+            while college_query.next(): valid_cols.append(f"'{college_query.value(0)}'")
+            col_list = ",".join(valid_cols) if valid_cols else "''"
             
-        model.setFilter(filter_str)
-        model.select()
+            prog_query = self.db.exec(f"SELECT program_code FROM program WHERE college_code IN ({col_list})")
+            valid_progs = []
+            while prog_query.next(): valid_progs.append(f"'{prog_query.value(0)}'")
+            prog_list = ",".join(valid_progs) if valid_progs else "''"
+            
+            base_filter = f"program_code IN ({prog_list})"
+        else:
+            base_filter = "1=1" # Means "show everything" for other tables
 
+        # 2. Build the Search Filter
+        if not text:
+            # If search is empty, just use the base visibility filter
+            model.setFilter(base_filter)
+        else:
+            if table_name == "student":
+                # Search across ALL student columns
+                search_filter = (f"({base_filter}) AND ("
+                                f"id LIKE '%{text}%' OR "
+                                f"firstname LIKE '%{text}%' OR "
+                                f"lastname LIKE '%{text}%' OR "
+                                f"program_code LIKE '%{text}%' OR "
+                                f"year LIKE '%{text}%' OR "
+                                f"gender LIKE '%{text}%')")
+            elif table_name == "program":
+                search_filter = (f"program_code LIKE '%{text}%' OR "
+                                f"program_name LIKE '%{text}%' OR "
+                                f"college_code LIKE '%{text}%'")
+            else: # college
+                search_filter = (f"college_code LIKE '%{text}%' OR "
+                                f"college_name LIKE '%{text}%'")
+            
+            model.setFilter(search_filter)
+
+        model.select()
+        
     def add_row(self):
         model, view = self.get_current_model_view()
         row = model.rowCount()
@@ -177,6 +215,10 @@ class StudentSystem(QMainWindow):
         
         self.student_model.blockSignals(False)
         self.program_model.blockSignals(False)
+        
+        _, view = self.get_current_model_view()
+        view.sortByColumn(view.horizontalHeader().sortIndicatorSection(), 
+                          view.horizontalHeader().sortIndicatorOrder())
     def save_changes(self):
         model, _ = self.get_current_model_view()
         
