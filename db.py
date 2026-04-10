@@ -7,25 +7,25 @@ def setup_database():
 
     cursor.executescript('''
         CREATE TABLE IF NOT EXISTS college (
-            code TEXT PRIMARY KEY,
-            name TEXT NOT NULL
+            college_code TEXT PRIMARY KEY,
+            college_name TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS program (
-            code TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
+            program_code TEXT PRIMARY KEY,
+            program_name TEXT NOT NULL,
             college_code TEXT,
-            FOREIGN KEY (college_code) REFERENCES college(code)
+            FOREIGN KEY (college_code) REFERENCES college(college_code)
         );
 
         CREATE TABLE IF NOT EXISTS student (
             id TEXT PRIMARY KEY,
             firstname TEXT NOT NULL,
             lastname TEXT NOT NULL,
-            course_code TEXT,
+            program_code TEXT,
             year INTEGER,
             gender TEXT,
-            FOREIGN KEY (course_code) REFERENCES program(code)
+            FOREIGN KEY (program_code) REFERENCES program(program_code)
         );
     ''')
 
