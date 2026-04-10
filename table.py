@@ -214,8 +214,11 @@ class StudentSystem(QMainWindow):
                           view.horizontalHeader().sortIndicatorOrder())
     def save_changes(self):
         model, _ = self.get_current_model_view()
-        
-        if model.tableName() == "student":
+        table_name = model.tableName()
+
+        if table_name == "student":
+            seen_ids = set()
+            
             program_query = self.db.exec("SELECT program_code FROM program")
             valid_programs = []
             while program_query.next():
@@ -223,41 +226,65 @@ class StudentSystem(QMainWindow):
 
             for row in range(model.rowCount()):
                 s_id = str(model.index(row, 0).data() or "").strip()
-                fname = str(model.index(row, 1).data() or "").strip().title()
-                lname = str(model.index(row, 2).data() or "").strip().title()
+                fname = str(model.index(row, 1).data() or "").strip()
+                lname = str(model.index(row, 2).data() or "").strip()
                 prog_code = str(model.index(row, 3).data() or "").strip()
                 year_lvl = str(model.index(row, 4).data() or "").strip()
                 gender = str(model.index(row, 5).data() or "").strip().capitalize()
 
                 id_pattern = r"^(201[8-9]|202[0-6])-([0-1][0-9]{3}|2[0-4][0-9]{2}|2500)$"
+                if not re.match(id_pattern, s_id) or s_id.endswith("-0000"):
+                    QMessageBox.warning(self, "Validation Error", 
+                        f"Row {row+1}: ID '{s_id}' is invalid.\nYear: 2018-2026, Sequence: 0001-2500")
+                    return
+
+                if s_id in seen_ids:
+                    QMessageBox.warning(self, "Validation Error", f"Row {row+1}: Duplicate ID '{s_id}' found!")
+                    return
+                seen_ids.add(s_id)
+
                 name_pattern = r"^[a-zA-Z\u00C0-\u017F\s\-]+$"
-                
                 if not re.match(name_pattern, fname) or not re.match(name_pattern, lname):
-                    QMessageBox.warning(self, "Invalid Name", 
-                                        f"Row {row+1}: Names must contain letters, spaces, or dashes only.")
+                    QMessageBox.warning(self, "Validation Error", 
+                        f"Row {row+1}: Names must contain letters, ñ, spaces, or dashes only.")
                     return
 
                 if prog_code not in valid_programs:
-                    QMessageBox.warning(self, "Invalid Program", 
-                                        f"Row {row+1}: Program '{prog_code}' does not exist!\n"
-                                        f"Please use an existing code from the Programs tab.")
+                    QMessageBox.warning(self, "Validation Error", 
+                        f"Row {row+1}: Program '{prog_code}' does not exist in the database.")
                     return
 
                 if year_lvl not in ["1", "2", "3", "4"]:
-                    QMessageBox.warning(self, "Invalid Year", f"Row {row+1}: Year must be 1, 2, 3, or 4.")
+                    QMessageBox.warning(self, "Validation Error", f"Row {row+1}: Year must be 1, 2, 3, or 4.")
                     return
 
                 if gender not in ["Male", "Female", "Other"]:
-                    QMessageBox.warning(self, "Invalid Gender", 
-                                        f"Row {row+1}: Gender must be 'Male', 'Female', or 'Other'.")
+                    QMessageBox.warning(self, "Validation Error", f"Row {row+1}: Gender must be Male, Female, or Other.")
+                    return
+
+        elif table_name == "program":
+            college_query = self.db.exec("SELECT college_code FROM college")
+            valid_colleges = []
+            while college_query.next():
+                valid_colleges.append(str(college_query.value(0)).strip())
+
+            for row in range(model.rowCount()):
+                col_code = str(model.index(row, 2).data() or "").strip()
+                if col_code not in valid_colleges:
+                    QMessageBox.warning(self, "Validation Error", 
+                        f"Row {row+1}: College '{col_code}' does not exist.")
                     return
 
         if model.submitAll():
+            self.student_model.select()
+            self.program_model.select()
+            self.college_model.select()
             self.apply_filters()
-            QMessageBox.information(self, "Success", "All records validated and saved!")
+            
+            QMessageBox.information(self, "Success", "All records validated and saved successfully!")
         else:
-            QMessageBox.warning(self, "Error", f"Database error: {model.lastError().text()}")
-    
+            QMessageBox.warning(self, "Database Error", f"Could not save changes: {model.lastError().text()}")
+            
     def refresh_table(self):
         """Reloads data from the database file"""
         model, _ = self.get_current_model_view()
